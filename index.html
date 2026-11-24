@@ -1,0 +1,1717 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>偷一顆蛋！(Steal an Egg Tycoon) - 寫實 3D 版</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@500;700;900&display=swap');
+    * { box-sizing: border-box; user-select: none; -webkit-user-select: none; }
+    body, html {
+      margin: 0; padding: 0; width: 100%; height: 100%;
+      overflow: hidden; font-family: 'Noto Sans TC', sans-serif;
+      background: #0f172a; touch-action: none;
+    }
+    #gameCanvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; z-index: 1; }
+    #hudLayer { position: fixed; inset: 0; z-index: 10; pointer-events: none; }
+    .interactive { pointer-events: auto; }
+    .rbx-btn {
+      transition: transform 0.08s ease, filter 0.12s ease;
+      box-shadow: 0 4px 0 rgba(0,0,0,0.35);
+    }
+    .rbx-btn:active {
+      transform: translateY(3px);
+      box-shadow: 0 1px 0 rgba(0,0,0,0.35);
+    }
+    @keyframes floatSlow {
+      0%, 100% { transform: translateY(0px); }
+      50% { transform: translateY(-6px); }
+    }
+    .animate-float { animation: floatSlow 2.6s ease-in-out infinite; }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+
+  <!-- 遊戲大廳覆蓋層 (預設訪客模式免登入直接開始) -->
+  <div id="lobbyOverlay" class="fixed inset-0 z-30 flex items-center justify-center bg-slate-950/75 backdrop-blur-md p-4">
+    <div class="w-full max-w-lg rounded-3xl bg-slate-900/95 border-2 border-emerald-400/50 shadow-2xl p-6 text-white">
+      <div class="flex items-center justify-between mb-3">
+        <span class="px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-400/50 text-emerald-300 text-xs font-bold">
+          🎭 訪客模式 (免登入即玩)
+        </span>
+        <span class="px-3 py-1 rounded-full bg-amber-500/20 border border-amber-400/50 text-amber-300 text-xs font-bold">
+          💰 初始資金 $200
+        </span>
+      </div>
+
+      <div class="text-center my-4">
+        <div class="text-5xl mb-2 animate-float">🥚✨</div>
+        <h1 class="text-3xl sm:text-4xl font-black tracking-tight bg-gradient-to-r from-amber-300 via-yellow-200 to-emerald-300 bg-clip-text text-transparent">
+          偷一顆蛋！3D 大亨
+        </h1>
+        <p class="text-slate-300 text-sm mt-1">買稀有蛋放置產錢，或趁對手雷射門關閉時潛入偷蛋！</p>
+      </div>
+
+      <!-- 操作模式選擇 -->
+      <div class="mb-4">
+        <div class="text-xs font-bold text-slate-400 mb-2">1. 選擇操作模式：</div>
+        <div class="grid grid-cols-2 gap-2.5">
+          <button id="lobbyPcBtn" class="rbx-btn py-2.5 px-3 rounded-2xl bg-blue-600 border-2 border-blue-300 font-bold text-sm flex items-center justify-center gap-1.5">
+            💻 電腦模式
+          </button>
+          <button id="lobbyMobileBtn" class="rbx-btn py-2.5 px-3 rounded-2xl bg-slate-800 border-2 border-slate-600 font-bold text-sm flex items-center justify-center gap-1.5">
+            📱 手機模式
+          </button>
+        </div>
+      </div>
+
+      <!-- 角色皮膚選擇 -->
+      <div class="mb-5">
+        <div class="text-xs font-bold text-slate-400 mb-2">2. 選擇角色皮膚：</div>
+        <div id="lobbySkinGrid" class="grid grid-cols-3 gap-2"></div>
+      </div>
+
+      <button id="startGameBtn" class="rbx-btn w-full py-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-lg tracking-wide">
+        ▶ 以訪客模式進入伺服器！
+      </button>
+
+      <div class="mt-3 text-center text-[11px] text-slate-400">
+        電腦：WASD 移動｜空白鍵 跳躍｜E 買蛋/偷蛋｜F 揮擊｜滑鼠右鍵旋轉視角
+      </div>
+    </div>
+  </div>
+
+  <!-- HUD 介面層 -->
+  <div id="hudLayer" class="hidden">
+    <!-- 頂部狀態列 -->
+    <div class="flex flex-wrap items-start justify-between gap-2 p-3">
+      <!-- 左上金錢與訪客狀態 -->
+      <div class="flex flex-wrap items-center gap-2">
+        <div class="interactive px-3.5 py-2 rounded-2xl bg-slate-900/85 border border-emerald-400/50 backdrop-blur-md text-white shadow-lg">
+          <div class="text-[11px] text-emerald-300 font-bold">💵 現金資產</div>
+          <div id="moneyDisplay" class="text-xl sm:text-2xl font-black text-amber-300">$200</div>
+          <div id="incomeDisplay" class="text-[11px] text-emerald-400 font-bold">+$0 / 秒</div>
+        </div>
+
+        <div class="interactive px-3 py-2 rounded-2xl bg-slate-900/85 border border-slate-600/60 backdrop-blur-md text-white shadow-lg">
+          <div class="text-xs font-bold text-cyan-300">🎭 訪客玩家</div>
+          <div id="rebirthDisplay" class="text-xs text-slate-300 mt-0.5">重生: 0 次 (1.0x)</div>
+          <div id="doorTimerDisplay" class="text-xs font-bold text-emerald-400 mt-0.5">🛡️ 雷射門: 就緒</div>
+        </div>
+      </div>
+
+      <!-- 右上快捷功能鈕 -->
+      <div class="flex flex-wrap items-center gap-1.5">
+        <button id="modeToggleBtn" class="interactive rbx-btn px-3 py-2 rounded-xl bg-blue-600/90 border border-blue-300/60 text-white text-xs font-bold">
+          💻 電腦模式
+        </button>
+        <button id="skinToggleBtn" class="interactive rbx-btn px-3 py-2 rounded-xl bg-purple-600/90 border border-purple-300/60 text-white text-xs font-bold">
+          🎨 角色皮膚
+        </button>
+        <button id="homeTeleportBtn" class="interactive rbx-btn px-3 py-2 rounded-xl bg-emerald-600/90 border border-emerald-300/60 text-white text-xs font-bold">
+          🏠 回基地 [H]
+        </button>
+        <button id="lockDoorBtn" class="interactive rbx-btn px-3 py-2 rounded-xl bg-rose-600/90 border border-rose-300/60 text-white text-xs font-bold">
+          🔒 鎖門 [L]
+        </button>
+        <button id="rebirthBtn" class="interactive rbx-btn px-3 py-2 rounded-xl bg-amber-500/90 border border-amber-200 text-slate-950 text-xs font-black">
+          ♻️ 重生
+        </button>
+      </div>
+    </div>
+
+    <!-- 中央上方提示橫幅 -->
+    <div id="toastBanner" class="fixed top-20 left-1/2 -translate-x-1/2 px-4 py-2 rounded-2xl bg-slate-900/90 border border-amber-400/70 text-amber-200 text-sm font-bold shadow-xl opacity-0 transition-opacity duration-200 pointer-events-none text-center max-w-[90vw]">
+      歡迎來到偷一顆蛋！
+    </div>
+
+    <!-- 手中抱蛋狀態提示 -->
+    <div id="carryingBanner" class="hidden fixed top-32 left-1/2 -translate-x-1/2 px-4 py-2 rounded-2xl bg-amber-500/95 border-2 border-white text-slate-950 font-black text-sm shadow-xl animate-bounce">
+      🥚 正抱著蛋！快跑回自家底座按 [E] 放置！
+    </div>
+
+    <!-- 角色皮膚彈出選單 -->
+    <div id="skinModal" class="hidden interactive fixed top-16 right-3 w-72 rounded-2xl bg-slate-900/95 border border-purple-400/60 p-4 text-white shadow-2xl z-20">
+      <div class="flex items-center justify-between mb-2">
+        <span class="font-black text-sm text-purple-300">🎨 更換角色皮膚</span>
+        <button id="closeSkinModalBtn" class="text-slate-400 hover:text-white font-bold px-2">✕</button>
+      </div>
+      <div id="hudSkinGrid" class="grid grid-cols-2 gap-2"></div>
+    </div>
+
+    <!-- 底部互動提示列 -->
+    <div id="contextPrompt" class="fixed bottom-24 sm:bottom-8 left-1/2 -translate-x-1/2 px-5 py-2.5 rounded-2xl bg-slate-900/90 border border-cyan-400/60 text-white text-xs sm:text-sm font-bold shadow-xl text-center max-w-[92vw]">
+      移動到中央輸送帶購買蛋，或潛入對手基地偷蛋！
+    </div>
+
+    <!-- 電腦模式底部操作說明 -->
+    <div id="pcControlHint" class="fixed bottom-2 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-slate-950/75 text-slate-300 text-[11px] font-medium">
+      [WASD] 移動 ｜ [空白鍵] 跳躍 ｜ [E] 買蛋/放蛋/偷蛋 ｜ [Q] 收取現金 ｜ [X] 賣蛋 ｜ [F] 揮擊 ｜ [右鍵拖曳] 轉視角
+    </div>
+
+    <!-- 手機模式虛擬搖桿與觸控按鈕 -->
+    <div id="touchControls" class="hidden fixed inset-0 pointer-events-none">
+      <!-- 左下 Roblox 風格移動搖桿 (稍微往右移更順手) -->
+      <div id="joystickZone" class="interactive fixed bottom-7 left-10 w-32 h-32 rounded-full bg-slate-900/45 border-2 border-white/40 backdrop-blur-sm flex items-center justify-center">
+        <div id="joystickKnob" class="w-14 h-14 rounded-full bg-white/80 shadow-lg border-2 border-slate-300 pointer-events-none"></div>
+      </div>
+
+      <!-- 右下多點觸控動作按鈕群 -->
+      <div class="fixed bottom-6 right-5 flex flex-col items-end gap-2.5">
+        <div class="flex items-center gap-2">
+          <button id="mCollectBtn" class="interactive rbx-btn w-14 h-14 rounded-2xl bg-emerald-500/90 border-2 border-white text-slate-950 font-black text-xs shadow-lg">
+            💰<br>收錢
+          </button>
+          <button id="mSellBtn" class="interactive rbx-btn w-14 h-14 rounded-2xl bg-rose-500/90 border-2 border-white text-white font-black text-xs shadow-lg">
+            🗑️<br>賣蛋
+          </button>
+          <button id="mSlapBtn" class="interactive rbx-btn w-14 h-14 rounded-2xl bg-orange-500/90 border-2 border-white text-white font-black text-xs shadow-lg">
+            👋<br>揮擊
+          </button>
+        </div>
+        <div class="flex items-center gap-3">
+          <button id="mInteractBtn" class="interactive rbx-btn w-16 h-16 rounded-full bg-amber-400/95 border-2 border-white text-slate-950 font-black text-sm shadow-xl">
+            互動<br>[E]
+          </button>
+          <button id="mJumpBtn" class="interactive rbx-btn w-20 h-20 rounded-full bg-sky-500/95 border-2 border-white text-white font-black text-base shadow-xl">
+            跳躍<br>⬆️
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // --- 0. 音效合成器 (Web Audio API) ---
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    let audioCtx = null;
+    function playTone(freq, type = 'sine', duration = 0.12, vol = 0.12) {
+      try {
+        if (!audioCtx) audioCtx = new AudioCtx();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + duration);
+      } catch (e) {}
+    }
+
+    // --- 1. 遊戲設定資料 ---
+    const SKINS = [
+      { id: 'classic', name: '😎 經典菜鳥', head: 0xfacc15, torso: 0x2563eb, legs: 0x16a34a, hat: 'none' },
+      { id: 'cyber', name: '🤖 賽博霓虹', head: 0xe2e8f0, torso: 0x0f172a, legs: 0x06b6d4, hat: 'visor' },
+      { id: 'royal', name: '👑 黃金皇室', head: 0xfde047, torso: 0x7e22ce, legs: 0xf59e0b, hat: 'crown' },
+      { id: 'ninja', name: '🥷 暗影忍者', head: 0x1e293b, torso: 0x0f172a, legs: 0x334155, hat: 'band' },
+      { id: 'sakura', name: '🌸 粉紅甜心', head: 0xffedd5, torso: 0xf472b6, legs: 0xfbcfe8, hat: 'ears' },
+      { id: 'dragon', name: '🐉 翡翠龍騎', head: 0xfef08a, torso: 0x059669, legs: 0x064e3b, hat: 'horns' }
+    ];
+
+    const EGG_CATALOG = [
+      { name: '普通白蛋', cost: 25, income: 4, color: 0xf8fafc },
+      { name: '草原斑點蛋', cost: 80, income: 14, color: 0x4ade80 },
+      { name: '海洋藍寶蛋', cost: 220, income: 38, color: 0x38bdf8 },
+      { name: '烈焰紅蓮蛋', cost: 600, income: 105, color: 0xf87171 },
+      { name: '紫晶幻影蛋', cost: 1600, income: 280, color: 0xc084fc },
+      { name: '純金皇冠蛋', cost: 4200, income: 750, color: 0xfacc15 },
+      { name: '星雲銀河蛋', cost: 11000, income: 2100, color: 0x818cf8 },
+      { name: '創世彩虹神蛋', cost: 30000, income: 6000, color: 0xf43f5e }
+    ];
+
+    const BASE_CONFIGS = [
+      { id: 'player', name: '你的基地', x: -24, z: -18, dirX: 1, color: 0x3b82f6, isPlayer: true },
+      { id: 'ai1', name: '紅隊大亨', x: 24, z: -18, dirX: -1, color: 0xef4444, isPlayer: false },
+      { id: 'ai2', name: '綠隊富豪', x: -24, z: 18, dirX: 1, color: 0x10b981, isPlayer: false },
+      { id: 'ai3', name: '紫隊霸主', x: 24, z: 18, dirX: -1, color: 0xa855f7, isPlayer: false }
+    ];
+
+    const state = {
+      started: false,
+      mode: 'pc',
+      skinId: 'classic',
+      money: 200,
+      rebirths: 0,
+      carryingEgg: null,
+      slapCooldown: 0,
+      doorLocked: false,
+      doorLockTimer: 0,
+      doorCooldown: 0
+    };
+
+    function formatMoney(n) {
+      if (n >= 1e9) return '$' + (n / 1e9).toFixed(2) + 'B';
+      if (n >= 1e6) return '$' + (n / 1e6).toFixed(2) + 'M';
+      if (n >= 1e3) return '$' + (n / 1e3).toFixed(1) + 'K';
+      return '$' + Math.floor(n);
+    }
+
+    function getRebirthMult() {
+      return 1 + state.rebirths * 0.5;
+    }
+
+    let toastTimeout = null;
+    function showToast(msg) {
+      const el = document.getElementById('toastBanner');
+      el.textContent = msg;
+      el.style.opacity = '1';
+      clearTimeout(toastTimeout);
+      toastTimeout = setTimeout(() => { el.style.opacity = '0'; }, 2400);
+    }
+
+    // --- 2. Three.js 寫實 3D 場景初始化 ---
+    const canvas = document.getElementById('gameCanvas');
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.05;
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x93c5fd);
+    scene.fog = new THREE.FogExp2(0xcbd5e1, 0.0048);
+
+    const camera = new THREE.PerspectiveCamera(56, window.innerWidth / window.innerHeight, 0.1, 380);
+
+    // 寫實大氣散射天空穹頂與太陽光盤
+    function buildSkyAndSun() {
+      const skyCanvas = document.createElement('canvas');
+      skyCanvas.width = 64;
+      skyCanvas.height = 512;
+      const sctx = skyCanvas.getContext('2d');
+      const grad = sctx.createLinearGradient(0, 0, 0, 512);
+      grad.addColorStop(0.0, '#1e3a8a');
+      grad.addColorStop(0.3, '#2563eb');
+      grad.addColorStop(0.58, '#60a5fa');
+      grad.addColorStop(0.82, '#bae6fd');
+      grad.addColorStop(1.0, '#e2e8f0');
+      sctx.fillStyle = grad;
+      sctx.fillRect(0, 0, 64, 512);
+
+      const skyDome = new THREE.Mesh(
+        new THREE.SphereGeometry(210, 32, 24),
+        new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(skyCanvas), side: THREE.BackSide, fog: false })
+      );
+      scene.add(skyDome);
+
+      const sunGroup = new THREE.Group();
+      const sunCore = new THREE.Mesh(
+        new THREE.SphereGeometry(7.5, 24, 24),
+        new THREE.MeshBasicMaterial({ color: 0xfffbeb, fog: false })
+      );
+      const sunHalo = new THREE.Mesh(
+        new THREE.SphereGeometry(14, 24, 24),
+        new THREE.MeshBasicMaterial({ color: 0xfef08a, transparent: true, opacity: 0.25, fog: false })
+      );
+      sunGroup.add(sunCore, sunHalo);
+      sunGroup.position.set(62, 96, -75);
+      scene.add(sunGroup);
+    }
+    buildSkyAndSun();
+
+    const hemiLight = new THREE.HemisphereLight(0xe0f2fe, 0x365314, 1.25);
+    scene.add(hemiLight);
+
+    const dirLight = new THREE.DirectionalLight(0xfff7ed, 2.2);
+    dirLight.position.set(42, 68, 36);
+    dirLight.castShadow = true;
+    dirLight.shadow.mapSize.width = 2048;
+    dirLight.shadow.mapSize.height = 2048;
+    dirLight.shadow.camera.near = 5;
+    dirLight.shadow.camera.far = 165;
+    const d = 56;
+    dirLight.shadow.camera.left = -d;
+    dirLight.shadow.camera.right = d;
+    dirLight.shadow.camera.top = d;
+    dirLight.shadow.camera.bottom = -d;
+    dirLight.shadow.bias = -0.0004;
+    scene.add(dirLight);
+
+    // 寫實草地纖維與凹凸貼圖
+    function createRealisticGrassTextures() {
+      const c = document.createElement('canvas');
+      c.width = 512; c.height = 512;
+      const g = c.getContext('2d');
+
+      const b = document.createElement('canvas');
+      b.width = 512; b.height = 512;
+      const bg = b.getContext('2d');
+
+      g.fillStyle = '#3f6212';
+      g.fillRect(0, 0, 512, 512);
+      bg.fillStyle = '#808080';
+      bg.fillRect(0, 0, 512, 512);
+
+      for (let i = 0; i < 400; i++) {
+        const x = Math.random() * 512, y = Math.random() * 512;
+        g.fillStyle = Math.random() > 0.5 ? 'rgba(77,124,15,0.25)' : 'rgba(54,83,20,0.25)';
+        g.beginPath();
+        g.arc(x, y, 8 + Math.random() * 24, 0, Math.PI * 2);
+        g.fill();
+      }
+
+      const bladeColors = ['#4d7c0f', '#65a30d', '#365314', '#84cc16', '#3f6212'];
+      for (let i = 0; i < 6500; i++) {
+        const x = Math.random() * 512, y = Math.random() * 512;
+        const len = 5 + Math.random() * 9;
+        const tilt = (Math.random() - 0.5) * 4;
+        g.strokeStyle = bladeColors[i % bladeColors.length];
+        g.lineWidth = 1.2 + Math.random();
+        g.beginPath(); g.moveTo(x, y); g.lineTo(x + tilt, y - len); g.stroke();
+
+        bg.strokeStyle = i % 2 === 0 ? '#b8b8b8' : '#555555';
+        bg.lineWidth = 1.3;
+        bg.beginPath(); bg.moveTo(x, y); bg.lineTo(x + tilt, y - len); bg.stroke();
+      }
+
+      for (let i = 0; i < 24; i++) {
+        g.fillStyle = i % 3 === 0 ? '#fef08a' : '#ffffff';
+        g.beginPath();
+        g.arc(Math.random() * 512, Math.random() * 512, 2.2, 0, Math.PI * 2);
+        g.fill();
+      }
+
+      const mapTex = new THREE.CanvasTexture(c);
+      mapTex.wrapS = mapTex.wrapT = THREE.RepeatWrapping;
+      mapTex.repeat.set(22, 22);
+
+      const bumpTex = new THREE.CanvasTexture(b);
+      bumpTex.wrapS = bumpTex.wrapT = THREE.RepeatWrapping;
+      bumpTex.repeat.set(22, 22);
+
+      return { mapTex, bumpTex };
+    }
+
+    function createStonePlazaTexture() {
+      const c = document.createElement('canvas');
+      c.width = 512; c.height = 512;
+      const g = c.getContext('2d');
+      g.fillStyle = '#64748b';
+      g.fillRect(0, 0, 512, 512);
+      const tile = 64;
+      for (let y = 0; y < 512; y += tile) {
+        for (let x = 0; x < 512; x += tile) {
+          const offset = (y / tile) % 2 === 0 ? 0 : tile / 2;
+          const shade = 128 + Math.floor((Math.random() - 0.5) * 28);
+          g.fillStyle = `rgb(${shade}, ${shade + 4}, ${shade + 10})`;
+          g.fillRect((x + offset) % 512 + 2, y + 2, tile - 4, tile - 4);
+        }
+      }
+      const tex = new THREE.CanvasTexture(c);
+      tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(6, 12);
+      return tex;
+    }
+
+    const grassTex = createRealisticGrassTextures();
+    const groundMesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(240, 240),
+      new THREE.MeshStandardMaterial({
+        map: grassTex.mapTex,
+        bumpMap: grassTex.bumpTex,
+        bumpScale: 0.14,
+        roughness: 0.92,
+        metalness: 0.02
+      })
+    );
+    groundMesh.rotation.x = -Math.PI / 2;
+    groundMesh.receiveShadow = true;
+    scene.add(groundMesh);
+
+    function buildSceneryDecorations() {
+      // 四周起伏山脈
+      const hillMat = new THREE.MeshStandardMaterial({ color: 0x3f6212, roughness: 0.95 });
+      const distantHillMat = new THREE.MeshStandardMaterial({ color: 0x4d7c0f, roughness: 0.96 });
+      for (let i = 0; i < 24; i++) {
+        const angle = (i / 24) * Math.PI * 2;
+        const dist = 78 + (i % 3) * 14;
+        const radius = 22 + (i % 4) * 7;
+        const hill = new THREE.Mesh(
+          new THREE.ConeGeometry(radius, 18 + (i % 5) * 5, 18),
+          i % 2 === 0 ? hillMat : distantHillMat
+        );
+        hill.position.set(Math.cos(angle) * dist, 7, Math.sin(angle) * dist);
+        scene.add(hill);
+      }
+
+      // 花崗岩石磚廣場
+      const plaza = new THREE.Mesh(
+        new THREE.BoxGeometry(24, 0.1, 56),
+        new THREE.MeshStandardMaterial({ map: createStonePlazaTexture(), roughness: 0.78, metalness: 0.05 })
+      );
+      plaza.position.set(0, 0.05, 0);
+      plaza.receiveShadow = true;
+      scene.add(plaza);
+
+      // 歐式鑄鐵暖光路燈
+      [[-10.5, -24], [10.5, -24], [-10.5, 24], [10.5, 24]].forEach(([lx, lz]) => {
+        const lamp = new THREE.Group();
+        const pole = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.14, 0.24, 5.2, 12),
+          new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.75, roughness: 0.35 })
+        );
+        pole.position.y = 2.6;
+        pole.castShadow = true;
+        const lantern = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.45, 0.32, 0.85, 8),
+          new THREE.MeshStandardMaterial({ color: 0xffedd5, emissive: 0xfbbf24, emissiveIntensity: 1.4 })
+        );
+        lantern.position.y = 5.4;
+        lamp.add(pole, lantern);
+        lamp.position.set(lx, 0, lz);
+        scene.add(lamp);
+      });
+
+      // 多層樹冠寫實大樹
+      const barkMat = new THREE.MeshStandardMaterial({ color: 0x5c3a21, roughness: 0.92 });
+      const foliageMats = [
+        new THREE.MeshStandardMaterial({ color: 0x2d5a27, roughness: 0.85 }),
+        new THREE.MeshStandardMaterial({ color: 0x3b7a33, roughness: 0.82 }),
+        new THREE.MeshStandardMaterial({ color: 0x1e4620, roughness: 0.88 })
+      ];
+      [[-42, -38], [-36, 38], [42, -38], [38, 38], [-45, 0], [45, 0], [0, -42], [0, 42]].forEach(([tx, tz], idx) => {
+        const tree = new THREE.Group();
+        const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.72, 4.4, 12), barkMat);
+        trunk.position.y = 2.2;
+        trunk.castShadow = true;
+        tree.add(trunk);
+        [[0, 5.2, 0, 2.5], [-1.3, 4.5, 0.9, 1.85], [1.3, 4.6, -0.8, 1.9], [0.2, 6.6, 0.2, 1.75]].forEach(([px, py, pz, rad], pIdx) => {
+          const crown = new THREE.Mesh(new THREE.IcosahedronGeometry(rad, 2), foliageMats[(idx + pIdx) % foliageMats.length]);
+          crown.position.set(px, py, pz);
+          crown.castShadow = true;
+          tree.add(crown);
+        });
+        tree.position.set(tx, 0, tz);
+        scene.add(tree);
+      });
+
+      // 立體白雲
+      const cloudMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, transparent: true, opacity: 0.92 });
+      [[-32, 34, -36], [28, 38, -28], [-22, 35, 34], [36, 33, 28], [0, 41, -10]].forEach(([cx, cy, cz]) => {
+        const cloud = new THREE.Group();
+        [[0, 0, 0, 3.8], [-3.2, -0.4, 0.6, 2.7], [3.3, -0.3, -0.5, 2.9], [1.1, 1.2, 0.2, 2.6]].forEach(([px, py, pz, r]) => {
+          const puff = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 2), cloudMat);
+          puff.scale.set(1.35, 0.65, 1.0);
+          puff.position.set(px, py, pz);
+          cloud.add(puff);
+        });
+        cloud.position.set(cx, cy, cz);
+        scene.add(cloud);
+      });
+    }
+    buildSceneryDecorations();
+
+    // 懸浮 3D 文字標牌工具
+    function makeTextSprite(lines, bgColor = 'rgba(15, 23, 42, 0.88)', borderColor = '#38bdf8', scaleMult = 1.0) {
+      const c = document.createElement('canvas');
+      c.width = 512; c.height = 220;
+      const g = c.getContext('2d');
+
+      g.fillStyle = bgColor;
+      g.beginPath();
+      g.roundRect(16, 16, 480, 188, 32);
+      g.fill();
+
+      g.lineWidth = 8;
+      g.strokeStyle = borderColor;
+      g.stroke();
+
+      g.textAlign = 'center';
+      lines.forEach((line, idx) => {
+        g.font = line.font || 'bold 38px "Noto Sans TC", sans-serif';
+        g.fillStyle = line.color || '#ffffff';
+        const yPos = lines.length === 1 ? 124 : (lines.length === 2 ? (86 + idx * 66) : (68 + idx * 52));
+        g.fillText(line.text, 256, yPos);
+      });
+
+      const tex = new THREE.CanvasTexture(c);
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true }));
+      sprite.scale.set(4.6 * scaleMult, 2.0 * scaleMult, 1);
+      return sprite;
+    }
+
+    // --- 3. 中央發光輸送帶 ---
+    const conveyorCanvas = document.createElement('canvas');
+    conveyorCanvas.width = 128; conveyorCanvas.height = 512;
+    const cc = conveyorCanvas.getContext('2d');
+    cc.fillStyle = '#1e293b'; cc.fillRect(0, 0, 128, 512);
+    cc.fillStyle = '#38bdf8';
+    for (let y = 0; y < 512; y += 64) {
+      cc.beginPath();
+      cc.moveTo(64, y + 48); cc.lineTo(104, y + 16); cc.lineTo(84, y + 16);
+      cc.lineTo(64, y + 32); cc.lineTo(44, y + 16); cc.lineTo(24, y + 16);
+      cc.closePath(); cc.fill();
+    }
+    const conveyorTex = new THREE.CanvasTexture(conveyorCanvas);
+    conveyorTex.wrapS = conveyorTex.wrapT = THREE.RepeatWrapping;
+    conveyorTex.repeat.set(1, 10);
+
+    const conveyorBelt = new THREE.Mesh(
+      new THREE.BoxGeometry(5.6, 0.35, 50),
+      new THREE.MeshStandardMaterial({ map: conveyorTex, roughness: 0.45, metalness: 0.4 })
+    );
+    conveyorBelt.position.set(0, 0.2, 0);
+    conveyorBelt.receiveShadow = true;
+    scene.add(conveyorBelt);
+
+    [-2.95, 2.95].forEach(rx => {
+      const rail = new THREE.Mesh(
+        new THREE.BoxGeometry(0.3, 0.55, 50.4),
+        new THREE.MeshStandardMaterial({ color: 0xf59e0b, metalness: 0.6, roughness: 0.3 })
+      );
+      rail.position.set(rx, 0.3, 0);
+      scene.add(rail);
+    });
+
+    // --- 4. 四座基地、圍牆、雷射門與 6 個產錢底座 ---
+    const bases = [];
+    const wallColliders = [];
+
+    function buildBases() {
+      const halfW = 8.5, halfD = 9.5;
+      const wallH = 2.6, wallT = 0.6;
+
+      BASE_CONFIGS.forEach(cfg => {
+        const group = new THREE.Group();
+        group.position.set(cfg.x, 0, cfg.z);
+        scene.add(group);
+
+        // 基地大理石地板
+        const floor = new THREE.Mesh(
+          new THREE.BoxGeometry(halfW * 2, 0.22, halfD * 2),
+          new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.55, metalness: 0.2 })
+        );
+        floor.position.y = 0.11;
+        floor.receiveShadow = true;
+        group.add(floor);
+
+        // 基地四周圍牆 (前方朝向中央保留 7.6 格寬大門)
+        const wallMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.65, metalness: 0.15 });
+        const trimMat = new THREE.MeshStandardMaterial({ color: cfg.color, emissive: cfg.color, emissiveIntensity: 0.25 });
+
+        function addWallSeg(lx, lz, w, d) {
+          const wMesh = new THREE.Mesh(new THREE.BoxGeometry(w, wallH, d), wallMat);
+          wMesh.position.set(lx, wallH / 2, lz);
+          wMesh.castShadow = true;
+          wMesh.receiveShadow = true;
+          group.add(wMesh);
+
+          const trim = new THREE.Mesh(new THREE.BoxGeometry(w + 0.06, 0.25, d + 0.06), trimMat);
+          trim.position.set(lx, wallH + 0.1, lz);
+          group.add(trim);
+
+          wallColliders.push({
+            minX: cfg.x + lx - w / 2 - 0.55,
+            maxX: cfg.x + lx + w / 2 + 0.55,
+            minZ: cfg.z + lz - d / 2 - 0.55,
+            maxZ: cfg.z + lz + d / 2 + 0.55,
+            height: wallH
+          });
+        }
+
+        // 後牆、上下側牆、以及前牆左右門柱
+        addWallSeg(-cfg.dirX * halfW, 0, wallT, halfD * 2);
+        addWallSeg(0, -halfD, halfW * 2, wallT);
+        addWallSeg(0, halfD, halfW * 2, wallT);
+        addWallSeg(cfg.dirX * halfW, -6.6, wallT, 5.8);
+        addWallSeg(cfg.dirX * halfW, 6.6, wallT, 5.8);
+
+        // 發光能量雷射門
+        const doorMesh = new THREE.Mesh(
+          new THREE.BoxGeometry(0.25, 2.7, 7.4),
+          new THREE.MeshStandardMaterial({
+            color: cfg.color, emissive: cfg.color, emissiveIntensity: 1.3,
+            transparent: true, opacity: 0.45
+          })
+        );
+        doorMesh.position.set(cfg.dirX * halfW, 1.35, 0);
+        doorMesh.visible = false;
+        group.add(doorMesh);
+
+        // 基地招牌
+        const sign = makeTextSprite(
+          [{ text: cfg.name, font: 'bold 44px "Noto Sans TC", sans-serif', color: '#ffffff' }],
+          'rgba(15,23,42,0.85)',
+          '#' + cfg.color.toString(16).padStart(6, '0'),
+          1.1
+        );
+        sign.position.set(0, 4.6, 0);
+        group.add(sign);
+
+        // 6 個產錢底座
+        const pedestals = [];
+        const slotCoords = [
+          [-cfg.dirX * 4.5, -5.2], [-cfg.dirX * 4.5, 0], [-cfg.dirX * 4.5, 5.2],
+          [0, -5.2], [0, 0], [0, 5.2]
+        ];
+
+        slotCoords.forEach(([sx, sz], idx) => {
+          const pedGroup = new THREE.Group();
+          pedGroup.position.set(sx, 0.22, sz);
+          group.add(pedGroup);
+
+          const baseCyl = new THREE.Mesh(
+            new THREE.CylinderGeometry(1.35, 1.55, 0.45, 24),
+            new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.8, roughness: 0.25 })
+          );
+          baseCyl.position.y = 0.22;
+          baseCyl.receiveShadow = true;
+          pedGroup.add(baseCyl);
+
+          const ring = new THREE.Mesh(
+            new THREE.TorusGeometry(1.38, 0.08, 12, 32),
+            new THREE.MeshStandardMaterial({ color: cfg.color, emissive: cfg.color, emissiveIntensity: 1.1 })
+          );
+          ring.rotation.x = Math.PI / 2;
+          ring.position.y = 0.46;
+          pedGroup.add(ring);
+
+          // 放置於底座上的 3D 物理清漆光澤蛋
+          const eggMesh = new THREE.Mesh(
+            new THREE.SphereGeometry(0.95, 32, 32),
+            new THREE.MeshPhysicalMaterial({
+              color: 0xffffff,
+              roughness: 0.16,
+              metalness: 0.18,
+              clearcoat: 0.85,
+              clearcoatRoughness: 0.12
+            })
+          );
+          eggMesh.scale.set(0.85, 1.22, 0.85);
+          eggMesh.position.y = 1.65;
+          eggMesh.castShadow = true;
+          eggMesh.visible = false;
+          pedGroup.add(eggMesh);
+
+          // 靠近時顯示每秒賺多少的 3D 懸浮標籤
+          const rateSprite = makeTextSprite(
+            [{ text: '+$0/s', font: 'bold 42px "Noto Sans TC", sans-serif', color: '#4ade80' }],
+            'rgba(15,23,42,0.92)', '#4ade80', 0.85
+          );
+          rateSprite.position.set(0, 3.35, 0);
+          rateSprite.visible = false;
+          pedGroup.add(rateSprite);
+
+          pedestals.push({
+            index: idx,
+            worldX: cfg.x + sx,
+            worldZ: cfg.z + sz,
+            egg: null,
+            storedCash: 0,
+            eggMesh,
+            rateSprite,
+            lastRateText: ''
+          });
+        });
+
+        bases.push({
+          ...cfg,
+          doorX: cfg.x + cfg.dirX * halfW,
+          doorMesh,
+          locked: false,
+          lockTimer: 0,
+          pedestals
+        });
+      });
+
+      // 預設給 AI 基地放幾顆蛋讓玩家可以去偷！
+      bases.forEach((b, bIdx) => {
+        if (!b.isPlayer) {
+          const starterEgg = EGG_CATALOG[Math.min(bIdx + 1, EGG_CATALOG.length - 1)];
+          placeEggOnPedestal(b.pedestals[0], { ...starterEgg });
+          placeEggOnPedestal(b.pedestals[1], { ...EGG_CATALOG[0] });
+        }
+      });
+    }
+
+    function placeEggOnPedestal(ped, eggData) {
+      ped.egg = eggData;
+      ped.storedCash = 0;
+      ped.eggMesh.material.color.setHex(eggData.color);
+      ped.eggMesh.visible = true;
+    }
+
+    function removeEggFromPedestal(ped) {
+      ped.egg = null;
+      ped.storedCash = 0;
+      ped.eggMesh.visible = false;
+      ped.rateSprite.visible = false;
+    }
+
+    buildBases();
+
+    // --- 5. 建立 Roblox 3D 方塊角色 (肩膀精準軸心，支援跳躍高舉雙手與皮膚換裝) ---
+    function createCharacter(skinId, isPlayer = false) {
+      const skin = SKINS.find(s => s.id === skinId) || SKINS[0];
+      const root = new THREE.Group();
+
+      const headMat = new THREE.MeshStandardMaterial({ color: skin.head, roughness: 0.45 });
+      const torsoMat = new THREE.MeshStandardMaterial({ color: skin.torso, roughness: 0.55 });
+      const legMat = new THREE.MeshStandardMaterial({ color: skin.legs, roughness: 0.65 });
+
+      // 雙腿
+      const leftLeg = new THREE.Mesh(new THREE.BoxGeometry(0.45, 1.0, 0.45), legMat);
+      leftLeg.position.set(-0.25, 0.5, 0);
+      leftLeg.castShadow = true;
+
+      const rightLeg = new THREE.Mesh(new THREE.BoxGeometry(0.45, 1.0, 0.45), legMat);
+      rightLeg.position.set(0.25, 0.5, 0);
+      rightLeg.castShadow = true;
+
+      // 軀幹
+      const torso = new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.05, 0.52), torsoMat);
+      torso.position.set(0, 1.52, 0);
+      torso.castShadow = true;
+
+      // 頭部 + 表情貼圖
+      const faceCanvas = document.createElement('canvas');
+      faceCanvas.width = 128; faceCanvas.height = 128;
+      const fg = faceCanvas.getContext('2d');
+      fg.fillStyle = '#' + skin.head.toString(16).padStart(6, '0');
+      fg.fillRect(0, 0, 128, 128);
+      fg.fillStyle = '#111827';
+      fg.beginPath(); fg.arc(44, 52, 7, 0, Math.PI * 2); fg.fill();
+      fg.beginPath(); fg.arc(84, 52, 7, 0, Math.PI * 2); fg.fill();
+      fg.lineWidth = 6; fg.strokeStyle = '#111827';
+      fg.beginPath(); fg.arc(64, 68, 22, 0.15 * Math.PI, 0.85 * Math.PI); fg.stroke();
+
+      const faceTex = new THREE.CanvasTexture(faceCanvas);
+      const headMats = [headMat, headMat, headMat, headMat, new THREE.MeshStandardMaterial({ map: faceTex }), headMat];
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.76, 0.76), headMats);
+      head.position.set(0, 2.48, 0);
+      head.castShadow = true;
+
+      // 頭飾群組
+      const hatGroup = new THREE.Group();
+      hatGroup.position.set(0, 2.88, 0);
+
+      // 左右手臂 (軸心對齊肩膀 y = 1.98，跳躍時筆直高舉過頭！)
+      const leftArmPivot = new THREE.Group();
+      leftArmPivot.position.set(-0.74, 1.98, 0);
+      const leftArmMesh = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.98, 0.42), headMat);
+      leftArmMesh.position.set(0, -0.44, 0);
+      leftArmMesh.castShadow = true;
+      leftArmPivot.add(leftArmMesh);
+
+      const rightArmPivot = new THREE.Group();
+      rightArmPivot.position.set(0.74, 1.98, 0);
+      const rightArmMesh = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.98, 0.42), headMat);
+      rightArmMesh.position.set(0, -0.44, 0);
+      rightArmMesh.castShadow = true;
+      rightArmPivot.add(rightArmMesh);
+
+      // 頭頂抱著的蛋
+      const carriedEggMesh = new THREE.Mesh(
+        new THREE.SphereGeometry(0.68, 24, 24),
+        new THREE.MeshPhysicalMaterial({ color: 0xfacc15, roughness: 0.18, clearcoat: 0.8 })
+      );
+      carriedEggMesh.scale.set(0.85, 1.2, 0.85);
+      carriedEggMesh.position.set(0, 3.55, 0.15);
+      carriedEggMesh.visible = false;
+
+      root.add(leftLeg, rightLeg, torso, head, hatGroup, leftArmPivot, rightArmPivot, carriedEggMesh);
+      scene.add(root);
+
+      const charObj = {
+        root, leftLeg, rightLeg, torso, head, hatGroup,
+        leftArmPivot, rightArmPivot, carriedEggMesh,
+        headMat, torsoMat, legMat, faceCanvas, faceTex,
+        x: isPlayer ? -14 : 0,
+        y: 0,
+        z: isPlayer ? -18 : 0,
+        vy: 0,
+        grounded: true,
+        rotY: 0,
+        walkPhase: 0,
+        slapAnim: 0
+      };
+
+      applySkinToCharacter(charObj, skinId);
+      return charObj;
+    }
+
+    function applySkinToCharacter(charObj, skinId) {
+      const skin = SKINS.find(s => s.id === skinId) || SKINS[0];
+      charObj.headMat.color.setHex(skin.head);
+      charObj.torsoMat.color.setHex(skin.torso);
+      charObj.legMat.color.setHex(skin.legs);
+
+      const fg = charObj.faceCanvas.getContext('2d');
+      fg.fillStyle = '#' + skin.head.toString(16).padStart(6, '0');
+      fg.fillRect(0, 0, 128, 128);
+      fg.fillStyle = '#111827';
+      fg.beginPath(); fg.arc(44, 52, 7, 0, Math.PI * 2); fg.fill();
+      fg.beginPath(); fg.arc(84, 52, 7, 0, Math.PI * 2); fg.fill();
+      fg.lineWidth = 6; fg.strokeStyle = '#111827';
+      fg.beginPath(); fg.arc(64, 68, 22, 0.15 * Math.PI, 0.85 * Math.PI); fg.stroke();
+      charObj.faceTex.needsUpdate = true;
+
+      while (charObj.hatGroup.children.length) charObj.hatGroup.remove(charObj.hatGroup.children[0]);
+      if (skin.hat === 'crown') {
+        const crown = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.36, 0.28, 0.28, 8),
+          new THREE.MeshStandardMaterial({ color: 0xfacc15, metalness: 0.8, roughness: 0.2 })
+        );
+        crown.position.y = 0.14;
+        charObj.hatGroup.add(crown);
+      } else if (skin.hat === 'visor') {
+        const visor = new THREE.Mesh(
+          new THREE.BoxGeometry(0.82, 0.22, 0.82),
+          new THREE.MeshStandardMaterial({ color: 0x06b6d4, emissive: 0x06b6d4, emissiveIntensity: 0.9 })
+        );
+        visor.position.y = -0.25;
+        charObj.hatGroup.add(visor);
+      } else if (skin.hat === 'band') {
+        const band = new THREE.Mesh(
+          new THREE.BoxGeometry(0.8, 0.16, 0.8),
+          new THREE.MeshStandardMaterial({ color: 0xef4444 })
+        );
+        band.position.y = -0.15;
+        charObj.hatGroup.add(band);
+      } else if (skin.hat === 'ears') {
+        const earMat = new THREE.MeshStandardMaterial({ color: 0xf472b6 });
+        [-0.24, 0.24].forEach(ex => {
+          const ear = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.32, 4), earMat);
+          ear.position.set(ex, 0.15, 0);
+          charObj.hatGroup.add(ear);
+        });
+      } else if (skin.hat === 'horns') {
+        const hornMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, emissive: 0xd97706, emissiveIntensity: 0.4 });
+        [-0.28, 0.28].forEach(hx => {
+          const horn = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.38, 8), hornMat);
+          horn.position.set(hx, 0.18, 0);
+          horn.rotation.z = hx < 0 ? 0.3 : -0.3;
+          charObj.hatGroup.add(horn);
+        });
+      }
+    }
+
+    const playerChar = createCharacter(state.skinId, true);
+    playerChar.root.position.set(playerChar.x, 0, playerChar.z);
+
+    // 2 位 AI 競爭對手
+    const aiBots = [
+      { char: createCharacter('royal', false), base: bases[1], timer: 1, targetX: 0, targetZ: 0 },
+      { char: createCharacter('ninja', false), base: bases[2], timer: 2, targetX: 0, targetZ: 0 }
+    ];
+    aiBots.forEach((bot, i) => {
+      bot.char.x = bot.base.x;
+      bot.char.z = bot.base.z;
+      bot.char.root.position.set(bot.char.x, 0, bot.char.z);
+    });
+
+    // --- 6. 輸送帶蛋生成與標籤 ---
+    const conveyorEggs = [];
+    function spawnConveyorEgg() {
+      const maxTier = Math.min(EGG_CATALOG.length, 4 + state.rebirths * 2);
+      const roll = Math.pow(Math.random(), 1.75);
+      const template = EGG_CATALOG[Math.floor(roll * maxTier)];
+
+      const mesh = new THREE.Mesh(
+        new THREE.SphereGeometry(0.92, 28, 28),
+        new THREE.MeshPhysicalMaterial({
+          color: template.color,
+          roughness: 0.16,
+          metalness: 0.18,
+          clearcoat: 0.85,
+          clearcoatRoughness: 0.12
+        })
+      );
+      mesh.scale.set(0.85, 1.2, 0.85);
+      mesh.position.set(0, 1.45, -23);
+      mesh.castShadow = true;
+      scene.add(mesh);
+
+      const realIncome = Math.round(template.income * getRebirthMult());
+      const label = makeTextSprite([
+        { text: template.name, font: 'bold 34px "Noto Sans TC", sans-serif', color: '#ffffff' },
+        { text: `💰 ${formatMoney(template.cost)}`, font: '900 42px "Noto Sans TC", sans-serif', color: '#fde047' },
+        { text: `+$${realIncome}/s`, font: 'bold 34px "Noto Sans TC", sans-serif', color: '#4ade80' }
+      ], 'rgba(15, 23, 42, 0.92)', '#fbbf24', 1.32);
+      label.position.set(0, 3.6, -23);
+      scene.add(label);
+
+      conveyorEggs.push({
+        template,
+        mesh,
+        label,
+        z: -23
+      });
+    }
+
+    // 開局預先在輸送帶放 4 顆蛋
+    [-16, -5, 6, 17].forEach((startZ, idx) => {
+      spawnConveyorEgg();
+      const last = conveyorEggs[conveyorEggs.length - 1];
+      last.z = startZ;
+      last.mesh.position.z = startZ;
+      last.label.position.z = startZ;
+    });
+
+    // 3D 金幣/跳躍粒子
+    const particles = [];
+    function spawnParticles(x, y, z, colorHex = 0xfacc15, count = 12) {
+      const mat = new THREE.MeshBasicMaterial({ color: colorHex });
+      const geo = new THREE.SphereGeometry(0.16, 8, 8);
+      for (let i = 0; i < count; i++) {
+        const p = new THREE.Mesh(geo, mat);
+        p.position.set(x, y, z);
+        scene.add(p);
+        particles.push({
+          mesh: p,
+          vx: (Math.random() - 0.5) * 6,
+          vy: 2.5 + Math.random() * 4.5,
+          vz: (Math.random() - 0.5) * 6,
+          life: 0.7
+        });
+      }
+    }
+
+    // --- 7. Roblox 第三人稱攝影機與輸入控制 (支援跳躍+移動同時進行) ---
+    const rbxCam = { yaw: 0, pitch: 0.36, dist: 15, dragging: false, lastX: 0, lastY: 0 };
+    const keys = new Set();
+    const joyInput = { active: false, x: 0, y: 0, touchId: null };
+
+    function triggerPlayerJump() {
+      if (!state.started) return;
+      if (playerChar.grounded) {
+        playerChar.vy = 13.6;
+        playerChar.grounded = false;
+        playTone(420, 'sine', 0.14, 0.12);
+        spawnParticles(playerChar.x, 0.2, playerChar.z, 0xffffff, 8);
+      }
+    }
+
+    window.addEventListener('keydown', e => {
+      const code = e.code;
+      keys.add(code);
+      if (code === 'Space') {
+        e.preventDefault();
+        triggerPlayerJump();
+      }
+      if (!state.started) return;
+      if (code === 'KeyE') handleInteractAction();
+      if (code === 'KeyQ') handleCollectCash();
+      if (code === 'KeyX') handleSellEgg();
+      if (code === 'KeyF') handleSlapAction();
+      if (code === 'KeyH') handleHomeTeleport();
+      if (code === 'KeyL') handleLockDoor();
+    });
+
+    window.addEventListener('keyup', e => {
+      keys.delete(e.code);
+    });
+
+    window.addEventListener('blur', () => keys.clear());
+
+    // 滑鼠右鍵拖曳旋轉視角 & 滾輪縮放
+    canvas.addEventListener('contextmenu', e => e.preventDefault());
+    canvas.addEventListener('mousedown', e => {
+      if (e.button === 2) {
+        rbxCam.dragging = true;
+        rbxCam.lastX = e.clientX;
+        rbxCam.lastY = e.clientY;
+      } else if (e.button === 0 && state.started && state.mode === 'pc') {
+        handleSlapAction();
+      }
+    });
+    window.addEventListener('mousemove', e => {
+      if (!rbxCam.dragging) return;
+      const dx = e.clientX - rbxCam.lastX;
+      const dy = e.clientY - rbxCam.lastY;
+      rbxCam.lastX = e.clientX;
+      rbxCam.lastY = e.clientY;
+      rbxCam.yaw -= dx * 0.0065;
+      rbxCam.pitch = Math.max(0.12, Math.min(1.25, rbxCam.pitch + dy * 0.0055));
+    });
+    window.addEventListener('mouseup', () => { rbxCam.dragging = false; });
+    canvas.addEventListener('wheel', e => {
+      rbxCam.dist = Math.max(6, Math.min(28, rbxCam.dist + e.deltaY * 0.01));
+    }, { passive: true });
+
+    // 手機單指滑動空白處旋轉視角
+    let camTouchId = null, camLastX = 0, camLastY = 0;
+    canvas.addEventListener('touchstart', e => {
+      if (camTouchId === null && e.changedTouches.length > 0) {
+        const t = e.changedTouches[0];
+        camTouchId = t.identifier;
+        camLastX = t.clientX;
+        camLastY = t.clientY;
+      }
+    }, { passive: true });
+    canvas.addEventListener('touchmove', e => {
+      for (const t of e.changedTouches) {
+        if (t.identifier === camTouchId) {
+          rbxCam.yaw -= (t.clientX - camLastX) * 0.008;
+          rbxCam.pitch = Math.max(0.12, Math.min(1.25, rbxCam.pitch + (t.clientY - camLastY) * 0.006));
+          camLastX = t.clientX;
+          camLastY = t.clientY;
+        }
+      }
+    }, { passive: true });
+    canvas.addEventListener('touchend', e => {
+      for (const t of e.changedTouches) {
+        if (t.identifier === camTouchId) camTouchId = null;
+      }
+    });
+
+    // 手機左下搖桿多點觸控
+    const joyZone = document.getElementById('joystickZone');
+    const joyKnob = document.getElementById('joystickKnob');
+    function updateJoystick(clientX, clientY) {
+      const rect = joyZone.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      const maxR = rect.width * 0.38;
+      let dx = clientX - cx;
+      let dy = clientY - cy;
+      const dist = Math.hypot(dx, dy);
+      if (dist > maxR) {
+        dx = (dx / dist) * maxR;
+        dy = (dy / dist) * maxR;
+      }
+      joyKnob.style.transform = `translate(${dx}px, ${dy}px)`;
+      joyInput.x = dx / maxR;
+      joyInput.y = dy / maxR;
+    }
+
+    joyZone.addEventListener('touchstart', e => {
+      e.preventDefault();
+      if (joyInput.touchId === null && e.targetTouches.length > 0) {
+        const t = e.targetTouches[0];
+        joyInput.touchId = t.identifier;
+        joyInput.active = true;
+        updateJoystick(t.clientX, t.clientY);
+      }
+    }, { passive: false });
+
+    joyZone.addEventListener('touchmove', e => {
+      e.preventDefault();
+      for (const t of e.targetTouches) {
+        if (t.identifier === joyInput.touchId) updateJoystick(t.clientX, t.clientY);
+      }
+    }, { passive: false });
+
+    const resetJoy = e => {
+      for (const t of e.changedTouches) {
+        if (t.identifier === joyInput.touchId) {
+          joyInput.touchId = null;
+          joyInput.active = false;
+          joyInput.x = 0;
+          joyInput.y = 0;
+          joyKnob.style.transform = 'translate(0px, 0px)';
+        }
+      }
+    };
+    joyZone.addEventListener('touchend', resetJoy);
+    joyZone.addEventListener('touchcancel', resetJoy);
+
+    // 綁定獨立多點觸控按鈕工具
+    function bindMultiTouchBtn(id, fn) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.addEventListener('touchstart', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        fn();
+      }, { passive: false });
+      el.addEventListener('click', e => {
+        e.preventDefault();
+        fn();
+      });
+    }
+
+    // --- 8. 核心遊戲互動邏輯 ---
+    function findNearestInteractable() {
+      const px = playerChar.x, pz = playerChar.z;
+
+      // 1. 檢查自家基地底座 (放蛋 / 收錢)
+      const myBase = bases[0];
+      let nearestMyPed = null, minMyDist = 3.2;
+      myBase.pedestals.forEach(ped => {
+        const dist = Math.hypot(px - ped.worldX, pz - ped.worldZ);
+        if (dist < minMyDist) { minMyDist = dist; nearestMyPed = ped; }
+      });
+      if (nearestMyPed) return { type: 'myPed', ped: nearestMyPed };
+
+      // 2. 如果手中沒抱蛋，檢查輸送帶上的蛋
+      if (!state.carryingEgg) {
+        let nearestConv = null, minConvDist = 3.8;
+        conveyorEggs.forEach(ce => {
+          const dist = Math.hypot(px - 0, pz - ce.z);
+          if (dist < minConvDist) { minConvDist = dist; nearestConv = ce; }
+        });
+        if (nearestConv) return { type: 'conveyor', eggObj: nearestConv };
+
+        // 3. 檢查對手基地底座上的蛋 (偷蛋！)
+        for (let i = 1; i < bases.length; i++) {
+          const enemyBase = bases[i];
+          for (const ped of enemyBase.pedestals) {
+            if (ped.egg) {
+              const dist = Math.hypot(px - ped.worldX, pz - ped.worldZ);
+              if (dist < 3.2) return { type: 'enemyPed', base: enemyBase, ped };
+            }
+          }
+        }
+      }
+      return null;
+    }
+
+    function handleInteractAction() {
+      const target = findNearestInteractable();
+      if (!target) {
+        showToast('靠近輸送帶上的蛋、自家底座或對手基地的蛋再按互動！');
+        return;
+      }
+
+      if (target.type === 'myPed') {
+        const ped = target.ped;
+        if (state.carryingEgg) {
+          if (ped.egg) {
+            showToast('❌ 這個底座已經有蛋了，請換一個空底座！');
+            return;
+          }
+          placeEggOnPedestal(ped, state.carryingEgg);
+          state.carryingEgg = null;
+          playerChar.carriedEggMesh.visible = false;
+          document.getElementById('carryingBanner').classList.add('hidden');
+          playTone(660, 'triangle', 0.18, 0.16);
+          spawnParticles(ped.worldX, 1.5, ped.worldZ, 0x4ade80, 16);
+          showToast(`✅ 成功放置【${ped.egg.name}】開始產錢！`);
+        } else if (ped.egg && ped.storedCash >= 1) {
+          handleCollectCash();
+        } else {
+          showToast('目前手中沒有蛋，去中央輸送帶買一顆吧！');
+        }
+      } else if (target.type === 'conveyor') {
+        const ce = target.eggObj;
+        if (state.money < ce.template.cost) {
+          showToast(`💸 現金不足！需要 ${formatMoney(ce.template.cost)}`);
+          playTone(180, 'sawtooth', 0.15, 0.1);
+          return;
+        }
+        state.money -= ce.template.cost;
+        state.carryingEgg = { ...ce.template };
+        playerChar.carriedEggMesh.material.color.setHex(ce.template.color);
+        playerChar.carriedEggMesh.visible = true;
+        document.getElementById('carryingBanner').classList.remove('hidden');
+
+        // 移除輸送帶上的該蛋
+        scene.remove(ce.mesh);
+        scene.remove(ce.label);
+        const idx = conveyorEggs.indexOf(ce);
+        if (idx !== -1) conveyorEggs.splice(idx, 1);
+
+        playTone(540, 'sine', 0.15, 0.15);
+        spawnParticles(playerChar.x, 2.5, playerChar.z, ce.template.color, 15);
+        showToast(`🛒 買下【${ce.template.name}】！快抱回自家底座按 [E] 放置！`);
+      } else if (target.type === 'enemyPed') {
+        const { base, ped } = target;
+        if (base.locked) {
+          showToast('🔒 對手基地雷射門鎖定中，無法偷竊！');
+          return;
+        }
+        state.carryingEgg = { ...ped.egg };
+        playerChar.carriedEggMesh.material.color.setHex(ped.egg.color);
+        playerChar.carriedEggMesh.visible = true;
+        document.getElementById('carryingBanner').classList.remove('hidden');
+
+        const stolenName = ped.egg.name;
+        removeEggFromPedestal(ped);
+        playTone(780, 'square', 0.2, 0.14);
+        spawnParticles(ped.worldX, 1.5, ped.worldZ, 0xf43f5e, 18);
+        showToast(`🥷 成功偷走 ${base.name} 的【${stolenName}】！快逃回自家基地！`);
+      }
+    }
+
+    function handleCollectCash() {
+      let totalCollected = 0;
+      bases[0].pedestals.forEach(ped => {
+        if (ped.storedCash >= 1) {
+          totalCollected += Math.floor(ped.storedCash);
+          ped.storedCash = 0;
+        }
+      });
+      if (totalCollected > 0) {
+        state.money += totalCollected;
+        playTone(880, 'sine', 0.16, 0.15);
+        spawnParticles(playerChar.x, 2.2, playerChar.z, 0xfacc15, 16);
+        showToast(`💰 收取了 ${formatMoney(totalCollected)} 產出現金！`);
+      } else {
+        showToast('底座目前還沒有累積現金可領取！');
+      }
+    }
+
+    function handleSellEgg() {
+      const target = findNearestInteractable();
+      if (target && target.type === 'myPed' && target.ped.egg) {
+        const refund = Math.floor(target.ped.egg.cost * 0.6);
+        const name = target.ped.egg.name;
+        state.money += refund;
+        removeEggFromPedestal(target.ped);
+        playTone(340, 'triangle', 0.15, 0.12);
+        showToast(`🗑️ 已出售【${name}】，回收 ${formatMoney(refund)}`);
+      } else {
+        showToast('請站到自家底座上的蛋旁邊再按賣蛋！');
+      }
+    }
+
+    function handleSlapAction() {
+      if (state.slapCooldown > 0) return;
+      state.slapCooldown = 0.65;
+      playerChar.slapAnim = 0.35;
+      playTone(260, 'sawtooth', 0.1, 0.1);
+
+      aiBots.forEach(bot => {
+        const dist = Math.hypot(playerChar.x - bot.char.x, playerChar.z - bot.char.z);
+        if (dist < 4.2) {
+          const angle = Math.atan2(bot.char.x - playerChar.x, bot.char.z - playerChar.z);
+          bot.char.x += Math.sin(angle) * 6;
+          bot.char.z += Math.cos(angle) * 6;
+          spawnParticles(bot.char.x, 1.8, bot.char.z, 0xf97316, 14);
+          showToast('👋 漂亮一巴掌！把對手擊飛了！');
+        }
+      });
+    }
+
+    function handleHomeTeleport() {
+      playerChar.x = -14;
+      playerChar.z = -18;
+      playerChar.y = 0;
+      playerChar.vy = 0;
+      playTone(520, 'sine', 0.15, 0.12);
+      showToast('🏠 已傳送回自家基地門口！');
+    }
+
+    function handleLockDoor() {
+      const myBase = bases[0];
+      if (myBase.locked) {
+        showToast('🛡️ 雷射門目前已經開啟保護中！');
+        return;
+      }
+      if (state.doorCooldown > 0) {
+        showToast(`⏳ 雷射門冷卻中，還需 ${Math.ceil(state.doorCooldown)} 秒！`);
+        return;
+      }
+      myBase.locked = true;
+      myBase.lockTimer = 25;
+      myBase.doorMesh.visible = true;
+      state.doorCooldown = 40;
+      playTone(620, 'triangle', 0.22, 0.15);
+      showToast('🔒 自家雷射門已上鎖 25 秒，小偷進不來了！');
+    }
+
+    function handleRebirth() {
+      const reqMoney = 5000 * Math.pow(3, state.rebirths);
+      if (state.money < reqMoney) {
+        showToast(`♻️ 重生需要累積 ${formatMoney(reqMoney)} 現金！`);
+        return;
+      }
+      state.rebirths += 1;
+      state.money = 200;
+      state.carryingEgg = null;
+      playerChar.carriedEggMesh.visible = false;
+      document.getElementById('carryingBanner').classList.add('hidden');
+      bases[0].pedestals.forEach(p => removeEggFromPedestal(p));
+      playTone(920, 'sine', 0.3, 0.18);
+      spawnParticles(playerChar.x, 2, playerChar.z, 0xfacc15, 28);
+      showToast(`🎉 重生成功！目前第 ${state.rebirths} 次重生，全場產錢倍率提升至 ${getRebirthMult().toFixed(1)}x！`);
+    }
+
+    // --- 9. 牆壁與雷射門碰撞偵測 (跳躍高於牆壁可直接躍過) ---
+    function resolveCollisions(charObj, isPlayer) {
+      charObj.x = Math.max(-44, Math.min(44, charObj.x));
+      charObj.z = Math.max(-44, Math.min(44, charObj.z));
+
+      if (charObj.y < 2.45) {
+        for (const w of wallColliders) {
+          if (charObj.x > w.minX && charObj.x < w.maxX && charObj.z > w.minZ && charObj.z < w.maxZ) {
+            const penLeft = charObj.x - w.minX;
+            const penRight = w.maxX - charObj.x;
+            const penTop = charObj.z - w.minZ;
+            const penBottom = w.maxZ - charObj.z;
+            const minPen = Math.min(penLeft, penRight, penTop, penBottom);
+            if (minPen === penLeft) charObj.x = w.minX;
+            else if (minPen === penRight) charObj.x = w.maxX;
+            else if (minPen === penTop) charObj.z = w.minZ;
+            else charObj.z = w.maxZ;
+          }
+        }
+      }
+
+      // 雷射門阻擋非基地主人
+      bases.forEach(b => {
+        if (b.locked && !(isPlayer && b.isPlayer)) {
+          if (Math.abs(charObj.x - b.doorX) < 0.9 && Math.abs(charObj.z - b.z) < 3.8 && charObj.y < 2.7) {
+            charObj.x = b.doorX + b.dirX * 0.95;
+          }
+        }
+      });
+    }
+
+    // --- 10. UI 與模式/皮膚切換綁定 ---
+    function setDeviceMode(mode) {
+      state.mode = mode;
+      const isMobile = mode === 'mobile';
+      document.getElementById('lobbyPcBtn').className = `rbx-btn py-2.5 px-3 rounded-2xl font-bold text-sm flex items-center justify-center gap-1.5 ${!isMobile ? 'bg-blue-600 border-2 border-blue-300' : 'bg-slate-800 border-2 border-slate-600'}`;
+      document.getElementById('lobbyMobileBtn').className = `rbx-btn py-2.5 px-3 rounded-2xl font-bold text-sm flex items-center justify-center gap-1.5 ${isMobile ? 'bg-blue-600 border-2 border-blue-300' : 'bg-slate-800 border-2 border-slate-600'}`;
+      document.getElementById('modeToggleBtn').textContent = isMobile ? '📱 手機模式' : '💻 電腦模式';
+      document.getElementById('touchControls').classList.toggle('hidden', !isMobile);
+      document.getElementById('pcControlHint').classList.toggle('hidden', isMobile);
+    }
+
+    function renderSkinSelectors() {
+      const lobbyGrid = document.getElementById('lobbySkinGrid');
+      const hudGrid = document.getElementById('hudSkinGrid');
+      lobbyGrid.innerHTML = '';
+      hudGrid.innerHTML = '';
+
+      SKINS.forEach(skin => {
+        const active = skin.id === state.skinId;
+        const btnClass = `rbx-btn py-2 px-2 rounded-xl text-xs font-bold border ${active ? 'bg-purple-600 border-amber-300 text-white' : 'bg-slate-800 border-slate-600 text-slate-200'}`;
+
+        const b1 = document.createElement('button');
+        b1.className = btnClass;
+        b1.textContent = skin.name;
+        b1.onclick = () => {
+          state.skinId = skin.id;
+          applySkinToCharacter(playerChar, skin.id);
+          renderSkinSelectors();
+        };
+        lobbyGrid.appendChild(b1);
+
+        const b2 = document.createElement('button');
+        b2.className = btnClass;
+        b2.textContent = skin.name;
+        b2.onclick = () => {
+          state.skinId = skin.id;
+          applySkinToCharacter(playerChar, skin.id);
+          renderSkinSelectors();
+          spawnParticles(playerChar.x, 1.8, playerChar.z, 0xc084fc, 14);
+          showToast(`🎨 已換裝為【${skin.name}】！`);
+        };
+        hudGrid.appendChild(b2);
+      });
+    }
+
+    document.getElementById('lobbyPcBtn').onclick = () => setDeviceMode('pc');
+    document.getElementById('lobbyMobileBtn').onclick = () => setDeviceMode('mobile');
+    document.getElementById('modeToggleBtn').onclick = () => {
+      setDeviceMode(state.mode === 'pc' ? 'mobile' : 'pc');
+      showToast(state.mode === 'mobile' ? '📱 已切換為手機觸控搖桿模式' : '💻 已切換為電腦鍵盤滑鼠模式');
+    };
+
+    document.getElementById('skinToggleBtn').onclick = () => {
+      document.getElementById('skinModal').classList.toggle('hidden');
+    };
+    document.getElementById('closeSkinModalBtn').onclick = () => {
+      document.getElementById('skinModal').classList.add('hidden');
+    };
+
+    document.getElementById('homeTeleportBtn').onclick = handleHomeTeleport;
+    document.getElementById('lockDoorBtn').onclick = handleLockDoor;
+    document.getElementById('rebirthBtn').onclick = handleRebirth;
+
+    bindMultiTouchBtn('mInteractBtn', handleInteractAction);
+    bindMultiTouchBtn('mJumpBtn', triggerPlayerJump);
+    bindMultiTouchBtn('mSlapBtn', handleSlapAction);
+    bindMultiTouchBtn('mCollectBtn', handleCollectCash);
+    bindMultiTouchBtn('mSellBtn', handleSellEgg);
+
+    document.getElementById('startGameBtn').onclick = () => {
+      state.started = true;
+      document.getElementById('lobbyOverlay').classList.add('hidden');
+      document.getElementById('hudLayer').classList.remove('hidden');
+      setDeviceMode(state.mode);
+      playTone(580, 'triangle', 0.2, 0.14);
+      showToast('🎉 歡迎加入偷一顆蛋！初始資金 $200 已入帳！');
+    };
+
+    // 自動偵測是否為觸控裝置並預選
+    if ('ontouchstart' in window && window.innerWidth < 820) {
+      setDeviceMode('mobile');
+    } else {
+      setDeviceMode('pc');
+    }
+    renderSkinSelectors();
+
+    // --- 11. 主遊戲迴圈與角色動畫 ---
+    let lastTime = performance.now();
+    let spawnTimer = 0;
+
+    function animate(now) {
+      requestAnimationFrame(animate);
+      const dt = Math.min(0.05, (now - lastTime) / 1000);
+      lastTime = now;
+
+      // 輸送帶滾動紋理與定時出蛋
+      conveyorTex.offset.y -= dt * 0.45;
+      spawnTimer += dt;
+      if (spawnTimer >= 2.8 && conveyorEggs.length < 11) {
+        spawnTimer = 0;
+        spawnConveyorEgg();
+      }
+
+      for (let i = conveyorEggs.length - 1; i >= 0; i--) {
+        const ce = conveyorEggs[i];
+        ce.z += dt * 3.2;
+        ce.mesh.position.z = ce.z;
+        ce.mesh.rotation.y += dt * 1.6;
+        ce.label.position.z = ce.z;
+        if (ce.z > 24) {
+          scene.remove(ce.mesh);
+          scene.remove(ce.label);
+          conveyorEggs.splice(i, 1);
+        }
+      }
+
+      // 基地產錢、雷射門倒數與靠近底座顯示每秒產出
+      let totalIncomePerSec = 0;
+      bases.forEach(b => {
+        if (b.locked) {
+          b.lockTimer -= dt;
+          if (b.lockTimer <= 0) {
+            b.locked = false;
+            b.doorMesh.visible = false;
+          }
+        }
+
+        b.pedestals.forEach(ped => {
+          if (ped.egg) {
+            const rate = Math.round(ped.egg.income * getRebirthMult());
+            if (b.isPlayer) {
+              totalIncomePerSec += rate;
+              ped.storedCash += rate * dt;
+            }
+            ped.eggMesh.rotation.y += dt * 1.4;
+            ped.eggMesh.position.y = 1.65 + Math.sin(now * 0.004 + ped.index) * 0.1;
+
+            // 玩家站在蛋旁邊時顯示該顆蛋每秒賺多少！
+            const distToPlayer = Math.hypot(playerChar.x - ped.worldX, playerChar.z - ped.worldZ);
+            if (distToPlayer < 4.5) {
+              const txt = b.isPlayer
+                ? `+$${rate}/s (待領 ${formatMoney(ped.storedCash)})`
+                : `+$${rate}/s`;
+              if (ped.lastRateText !== txt) {
+                ped.lastRateText = txt;
+                ped.rateSprite.material.map.dispose();
+                const updated = makeTextSprite(
+                  [{ text: txt, font: 'bold 36px "Noto Sans TC", sans-serif', color: '#4ade80' }],
+                  'rgba(15,23,42,0.92)', '#4ade80', 0.9
+                );
+                ped.rateSprite.material.map = updated.material.map;
+                ped.rateSprite.material.needsUpdate = true;
+              }
+              ped.rateSprite.visible = true;
+            } else {
+              ped.rateSprite.visible = false;
+            }
+          }
+        });
+      });
+
+      if (state.doorCooldown > 0) state.doorCooldown = Math.max(0, state.doorCooldown - dt);
+      if (state.slapCooldown > 0) state.slapCooldown = Math.max(0, state.slapCooldown - dt);
+
+      // 玩家移動與跳躍物理 (支援跳躍與移動同時進行)
+      let moveX = 0, moveZ = 0;
+      if (state.started) {
+        let forward = 0, right = 0;
+        if (keys.has('KeyW') || keys.has('ArrowUp')) forward += 1;
+        if (keys.has('KeyS') || keys.has('ArrowDown')) forward -= 1;
+        if (keys.has('KeyD') || keys.has('ArrowRight')) right += 1;
+        if (keys.has('KeyA') || keys.has('ArrowLeft')) right -= 1;
+
+        if (joyInput.active) {
+          forward -= joyInput.y;
+          right += joyInput.x;
+        }
+
+        const len = Math.hypot(forward, right);
+        if (len > 0.05) {
+          const nf = forward / Math.max(1, len);
+          const nr = right / Math.max(1, len);
+          const sinY = Math.sin(rbxCam.yaw);
+          const cosY = Math.cos(rbxCam.yaw);
+          moveX = -sinY * nf + cosY * nr;
+          moveZ = -cosY * nf - sinY * nr;
+        }
+
+        const speed = state.carryingEgg ? 10.2 : 12.6;
+        playerChar.x += moveX * speed * dt;
+        playerChar.z += moveZ * speed * dt;
+
+        // 跳躍重力
+        playerChar.y += playerChar.vy * dt;
+        if (playerChar.y > 0) {
+          playerChar.vy -= 32 * dt;
+          playerChar.grounded = false;
+        } else {
+          playerChar.y = 0;
+          playerChar.vy = 0;
+          playerChar.grounded = true;
+        }
+
+        resolveCollisions(playerChar, true);
+      }
+
+      // 更新玩家 3D 姿勢 (經典 Roblox 跳躍高舉雙手！)
+      playerChar.root.position.set(playerChar.x, playerChar.y, playerChar.z);
+      const isMoving = Math.hypot(moveX, moveZ) > 0.05;
+      if (isMoving) {
+        const targetRot = Math.atan2(moveX, moveZ);
+        playerChar.rotY = targetRot;
+        playerChar.walkPhase += dt * 13;
+      }
+      playerChar.root.rotation.y = playerChar.rotY;
+
+      if (playerChar.slapAnim > 0) playerChar.slapAnim -= dt;
+
+      if (!playerChar.grounded) {
+        // 跳躍時雙手筆直高舉過頭並微微張開
+        playerChar.leftArmPivot.rotation.x = Math.PI;
+        playerChar.rightArmPivot.rotation.x = Math.PI;
+        playerChar.leftArmPivot.rotation.z = -0.18;
+        playerChar.rightArmPivot.rotation.z = 0.18;
+        playerChar.leftLeg.rotation.x = 0.25;
+        playerChar.rightLeg.rotation.x = -0.25;
+      } else if (state.carryingEgg) {
+        // 抱蛋時雙手舉起托住蛋
+        playerChar.leftArmPivot.rotation.x = Math.PI * 0.85;
+        playerChar.rightArmPivot.rotation.x = Math.PI * 0.85;
+        playerChar.leftArmPivot.rotation.z = -0.1;
+        playerChar.rightArmPivot.rotation.z = 0.1;
+        const swing = isMoving ? Math.sin(playerChar.walkPhase) * 0.65 : 0;
+        playerChar.leftLeg.rotation.x = swing;
+        playerChar.rightLeg.rotation.x = -swing;
+      } else {
+        const swing = isMoving ? Math.sin(playerChar.walkPhase) * 0.65 : 0;
+        playerChar.leftArmPivot.rotation.x = -swing;
+        playerChar.rightArmPivot.rotation.x = playerChar.slapAnim > 0 ? -Math.PI * 0.7 : swing;
+        playerChar.leftArmPivot.rotation.z = 0;
+        playerChar.rightArmPivot.rotation.z = 0;
+        playerChar.leftLeg.rotation.x = swing;
+        playerChar.rightLeg.rotation.x = -swing;
+      }
+
+      // 更新 AI 對手簡易巡邏與自動補蛋
+      aiBots.forEach(bot => {
+        bot.timer -= dt;
+        if (bot.timer <= 0) {
+          bot.timer = 2.5 + Math.random() * 2.5;
+          bot.targetX = bot.base.x + (Math.random() - 0.5) * 10;
+          bot.targetZ = bot.base.z + (Math.random() - 0.5) * 10;
+          // 若 AI 底座全空則自動補一顆蛋讓玩家有目標可偷
+          if (bot.base.pedestals.every(p => !p.egg)) {
+            const randEgg = EGG_CATALOG[Math.floor(Math.random() * 4)];
+            placeEggOnPedestal(bot.base.pedestals[0], { ...randEgg });
+          }
+        }
+        const dx = bot.targetX - bot.char.x;
+        const dz = bot.targetZ - bot.char.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > 0.4) {
+          bot.char.x += (dx / dist) * 5.2 * dt;
+          bot.char.z += (dz / dist) * 5.2 * dt;
+          bot.char.rotY = Math.atan2(dx, dz);
+          bot.char.walkPhase += dt * 10;
+          bot.char.leftLeg.rotation.x = Math.sin(bot.char.walkPhase) * 0.5;
+          bot.char.rightLeg.rotation.x = -Math.sin(bot.char.walkPhase) * 0.5;
+        }
+        resolveCollisions(bot.char, false);
+        bot.char.root.position.set(bot.char.x, 0, bot.char.z);
+        bot.char.root.rotation.y = bot.char.rotY;
+      });
+
+      // 更新粒子特效
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.life -= dt;
+        p.mesh.position.x += p.vx * dt;
+        p.mesh.position.y += p.vy * dt;
+        p.mesh.position.z += p.vz * dt;
+        p.vy -= 12 * dt;
+        if (p.life <= 0) {
+          scene.remove(p.mesh);
+          particles.splice(i, 1);
+        }
+      }
+
+      // 更新 Roblox 第三人稱追尾攝影機
+      const targetLookX = playerChar.x;
+      const targetLookY = playerChar.y + 2.1;
+      const targetLookZ = playerChar.z;
+      const camX = targetLookX + Math.sin(rbxCam.yaw) * Math.cos(rbxCam.pitch) * rbxCam.dist;
+      const camY = Math.max(1.2, targetLookY + Math.sin(rbxCam.pitch) * rbxCam.dist);
+      const camZ = targetLookZ + Math.cos(rbxCam.yaw) * Math.cos(rbxCam.pitch) * rbxCam.dist;
+      camera.position.lerp(new THREE.Vector3(camX, camY, camZ), 0.22);
+      camera.lookAt(targetLookX, targetLookY, targetLookZ);
+
+      // 更新 HUD 數值與底部互動提示
+      if (state.started) {
+        document.getElementById('moneyDisplay').textContent = formatMoney(state.money);
+        document.getElementById('incomeDisplay').textContent = `+$${totalIncomePerSec} / 秒`;
+        document.getElementById('rebirthDisplay').textContent = `重生: ${state.rebirths} 次 (${getRebirthMult().toFixed(1)}x)`;
+
+        const doorEl = document.getElementById('doorTimerDisplay');
+        if (bases[0].locked) {
+          doorEl.textContent = `🔒 雷射門保護中: ${Math.ceil(bases[0].lockTimer)}s`;
+          doorEl.className = 'text-xs font-bold text-rose-400 mt-0.5';
+        } else if (state.doorCooldown > 0) {
+          doorEl.textContent = `⏳ 門鎖冷卻: ${Math.ceil(state.doorCooldown)}s`;
+          doorEl.className = 'text-xs font-bold text-amber-400 mt-0.5';
+        } else {
+          doorEl.textContent = '🛡️ 雷射門: 就緒 [L]';
+          doorEl.className = 'text-xs font-bold text-emerald-400 mt-0.5';
+        }
+
+        const near = findNearestInteractable();
+        const promptEl = document.getElementById('contextPrompt');
+        if (near) {
+          if (near.type === 'conveyor') {
+            const inc = Math.round(near.eggObj.template.income * getRebirthMult());
+            promptEl.textContent = `🥚 【${near.eggObj.template.name}】售價 ${formatMoney(near.eggObj.template.cost)}｜每秒賺 +$${inc}/s — 按 [E] 購買！`;
+          } else if (near.type === 'myPed') {
+            if (state.carryingEgg && !near.ped.egg) {
+              promptEl.textContent = `✨ 空底座 — 按 [E] 放置【${state.carryingEgg.name}】開始產錢！`;
+            } else if (near.ped.egg) {
+              const inc = Math.round(near.ped.egg.income * getRebirthMult());
+              promptEl.textContent = `💎 【${near.ped.egg.name}】每秒賺 +$${inc}/s (待領 ${formatMoney(near.ped.storedCash)}) — [Q] 收錢 / [X] 賣蛋`;
+            } else {
+              promptEl.textContent = '空底座：去中央輸送帶買蛋或去對手基地偷蛋！';
+            }
+          } else if (near.type === 'enemyPed') {
+            const inc = Math.round(near.ped.egg.income * getRebirthMult());
+            promptEl.textContent = `🥷 發現 ${near.base.name} 的【${near.ped.egg.name}】(+$${inc}/s) — 按 [E] 偷走！`;
+          }
+        } else {
+          promptEl.textContent = state.carryingEgg
+            ? `🏃 正抱著【${state.carryingEgg.name}】！快跑回左側藍色自家底座按 [E] 放置！`
+            : '移動到中央輸送帶購買蛋，或潛入對手基地偷蛋！';
+        }
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    window.onload = () => {
+      animate(performance.now());
+    };
+  </script>
+</body>
+</html>
